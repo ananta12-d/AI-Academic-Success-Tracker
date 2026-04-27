@@ -1,0 +1,15 @@
+# API Keys and Secrets
+.env
+
+# Databases
+*.db
+app.db
+
+# Python Folders
+__pycache__/
+venv/
+.venv
+
+# OS files
+.DS_Store
+Thumbs.db

@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Educator Analytics Dashboard</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-dragdata@2.2.3/dist/chartjs-plugin-dragdata.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+</head>
+<body>
+{% raw %}
+<div id="app" class="admin-container">
+    
+    <div class="header flex-between">
+        <h2 style="color: var(--primary);">🎓 Educator Analytics Platform</h2>
+        <div class="controls">
+            <select v-model="selectedCourse" @change="loadCourseData">
+                <option value="BCA">BCA</option>
+                <option value="BSC">BSC</option>
+                <option value="BBA">BBA</option>
+            </select>
+            <button @click="downloadClassPDF" class="btn-punchy btn-primary">📄 PDF Report</button>
+            <button @click="downloadClassCSV" class="btn-punchy btn-success">📥 CSV Export</button>
+            <button class="theme-toggle btn-punchy" style="background: var(--sidebar-hover); color: var(--text-color);" @click="toggleTheme">
+                {{ isDarkMode ? '☀️ Light' : '🌙 Dark' }}
+            </button>
+            <button @click="logout" class="btn-punchy btn-danger">Logout</button>
+        </div>
+    </div>
+
+    <div class="tabs">
+        <button :class="['tab-btn', { active: currentTab === 'classroom' }]" @click="currentTab = 'classroom'">📊 Classroom Overview</button>
+        <button :class="['tab-btn', { active: currentTab === 'individual' }]" @click="currentTab = 'individual'">👤 Students Overview</button>
+    </div>
+
+    <div v-show="currentTab === 'classroom'">
+        <div class="stats-grid">
+            <div class="card-bouncy" style="padding: 20px; text-align: center;">
+                <h3 style="color: var(--primary); font-size: 32px; margin: 0;">{{ students.length }}</h3>
+                <p>Total Enrolled Students</p>
+            </div>
+            <div class="card-bouncy" style="padding: 20px; text-align: center;">
+                <h3 style="color: var(--success); font-size: 32px; margin: 0;">{{ passRate }}%</h3>
+                <p>Projected Pass Rate</p>
+            </div>
+            <div class="card-bouncy" style="padding: 20px; text-align: center;">
+                <h3 style="color: var(--danger); font-size: 32px; margin: 0;">{{ atRiskStudents.length }}</h3>
+                <p>Students Needing Support</p>
+            </div>
+        </div>
+
+        <div class="overview-grid">
+            <div class="card-bouncy list-box">
+                <h3 style="color: var(--success); margin-top: 0;">🏆 High Achievers</h3>
+                <p style="font-size: 13px; opacity: 0.7;">Consistently high attendance and marks.</p>
+                <div v-for="student in safeStudents.slice(0, 5)" :key="student.roll_no" style="padding: 10px 0; border-bottom: 1px solid var(--border-color);">
+                    <strong>{{ student.student_name }}</strong> ({{ student.roll_no }}) - CGPA: {{ student.previous_cgpa }}
+                </div>
+            </div>
+
+            <div class="card-bouncy list-box">
+                <h3 style="color: var(--danger); margin-top: 0;">⚠️ Requires Support</h3>
+                <p style="font-size: 13px; opacity: 0.7;">Projected to struggle based on current trajectory.</p>
+                <div v-for="student in atRiskStudents" :key="student.roll_no" style="padding: 10px 0; border-bottom: 1px solid var(--border-color);">
+                    <strong>{{ student.student_name }}</strong> ({{ student.roll_no }}) - Att: {{ student.attendance }}%
+                </div>
+            </div>
+
+            <div class="card-bouncy suggestions">
+                <h3 style="margin-top: 0;">🤖 AI Cohort Analysis</h3>
+                <ul style="margin: 0; padding-left: 20px; line-height: 1.8; font-size: 15px;">
+                    <li v-for="suggestion in dynamicSuggestions" :key="suggestion">{{ suggestion }}</li>
+                </ul>
+            </div>
+
+            <div class="card-bouncy list-box" style="grid-column: span 2; height: auto;">
+                <h3 style="margin-top: 0; text-align: center;">📈 Class Distribution</h3>
+                <div style="position: relative; height: 300px; width: 100%;">
+                    <canvas id="classBarChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div v-show="currentTab === 'individual'" class="container">
+        <div class="card-bouncy sidebar">
+            <h3 style="margin-top: 0; border-bottom: 1px solid var(--border-color); padding-bottom: 10px;">Student Roster</h3>
+            <div v-for="student in students" :key="student.roll_no" class="student-card" :class="{ 'active-student': simData && simData.roll_no === student.roll_no }" @click="selectStudent(student)">
+                <div>
+                    <strong>{{ student.student_name }}</strong><br>
+                    <small style="opacity: 0.7;">{{ student.roll_no }}</small>
+                </div>
+                <span :class="['badge', student.predicted_risk === 1 ? 'risk' : 'safe']">{{ student.predicted_risk === 1 ? 'Needs Support' : 'On Track' }}</span>
+            </div>
+        </div>
+
+        <div class="card-bouncy main-panel" v-if="simData">
+            <div class="sim-form" style="max-height: 550px; overflow-y: auto; padding-right: 15px;">
+                <h3 style="margin-top: 0;">{{ simData.student_name }}</h3>
+                <label>Attendance (%)</label> <input type="number" v-model="simData.attendance">
+                <label>Internal Marks (/30)</label> <input type="number" v-model="simData.internal_marks">
+                <label>Unit Test Marks (/50)</label> <input type="number" v-model="simData.unit_test_marks">
+                <label>Assignments (/10)</label> <input type="number" v-model="simData.assignments_completed">
+                <label>Study Hours</label> <input type="number" v-model="simData.study_hours_weekly">
+                
+                <div style="margin-top: 15px; padding: 15px; border-radius: 8px; text-align: center;" :class="[livePrediction === 1 ? 'risk' : 'safe']">
+                    <strong>AI Projection:</strong><br>{{ livePrediction === 1 ? '⚠️ Academic Support Recommended' : '✅ Pathway to Success' }}
+                </div>
+
+                <div v-if="liveDrivers && liveDrivers.length > 0" class="card-bouncy" style="margin-top: 15px; padding: 15px; background: var(--bg-color); border: 1px solid var(--border-color);">
+                    <h4 style="margin: 0 0 10px 0; color: var(--primary); font-size: 14px;">🧠 Key AI Drivers</h4>
+                    <p style="font-size: 12px; opacity: 0.7; margin-top: -5px;">Why the AI made this decision:</p>
+                    <ul style="margin: 0; padding-left: 20px; font-size: 13px; line-height: 1.6;">
+                        <li v-for="driver in liveDrivers" :key="driver.feature">
+                            <strong>{{ driver.feature }}</strong> 
+                            <span :style="{ color: driver.impact > 0 ? '#ef4444' : '#10b981', fontWeight: 'bold' }">
+                                ({{ driver.impact > 0 ? '↑ Increases Risk' : '↓ Lowers Risk' }})
+                            </span>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+            <div class="chart-container">
+                <canvas id="liveRadarChart"></canvas>
+                <button @click="openModal" class="btn-punchy btn-purple" style="margin-top: 20px;">🔍 Expand & Interact</button>
+            </div>
+        </div>
+        
+        <div class="card-bouncy main-panel flex-center" v-else>
+            <p style="opacity: 0.6; font-size: 1.2rem;">👈 Select a student from the roster.</p>
+        </div>
+    </div>
+
+    <div v-if="isModalOpen" class="modal-overlay" @click.self="closeModal">
+        <div class="modal-content">
+            <div class="modal-chart-section">
+                <button class="close-btn" @click="closeModal">✕</button>
+                <h3 style="margin-top: 0;">Interactive Graph Simulation</h3>
+                <div style="width: 100%; height: 90%; display: flex; justify-content: center;"><canvas id="interactiveRadarChart"></canvas></div>
+                <div style="margin-top: 10px; font-weight: bold; color: var(--primary);">👆 Drag the blue dots to simulate score changes</div>
+            </div>
+            
+            <div class="modal-details-section">
+                <button @click="downloadStudentPDF" class="btn-punchy btn-purple" style="width: 100%;">📄 Download Student Report</button>
+                
+                <div class="sim-form" style="background: transparent;">
+                    <label>Attendance (%)</label> <input type="number" v-model="simData.attendance">
+                    <label>Internal Marks (/30)</label> <input type="number" v-model="simData.internal_marks">
+                    <label>Unit Test Marks (/50)</label> <input type="number" v-model="simData.unit_test_marks">
+                    <label>Assignments (/10)</label> <input type="number" v-model="simData.assignments_completed">
+                </div>
+
+                <div class="card-bouncy" style="padding: 25px; background: var(--card-bg);">
+                    <h2 style="margin: 0;">{{ simData.student_name }}</h2>
+                    <p style="margin: 0; opacity: 0.7;">Roll No: {{ simData.roll_no }} | Course: {{ simData.course }}</p>
+                    
+                    <div style="display: flex; justify-content: space-between; margin-top: 15px; font-size: 15px; background: var(--sidebar-hover); padding: 10px; border-radius: 6px;">
+                        <div><strong>Att:</strong> {{ simData.attendance }}%</div>
+                        <div><strong>Internal:</strong> {{ simData.internal_marks }}/30</div>
+                        <div><strong>Unit Test:</strong> {{ simData.unit_test_marks }}/50</div>
+                    </div>
+
+                    <hr style="border: 0; border-top: 1px solid var(--border-color); margin: 20px 0;">
+                    
+                    <div style="background: var(--bg-color); padding: 15px; border-radius: 8px; border-left: 4px solid var(--warning);">
+                        <h4 style="margin: 0 0 10px 0; color: #d97706;">Personalized Action Plan</h4>
+                        <ul style="margin: 0; padding-left: 20px; font-size: 14px; line-height: 1.6;">
+                            <li v-for="suggestion in studentSuggestions" :key="suggestion">{{ suggestion }}</li>
+                        </ul>
+                    </div>
+
+                    <div style="margin-top: 20px; padding: 15px; border-radius: 8px; text-align: center; font-size: 16px;" 
+                         :class="[livePrediction === 1 ? 'risk' : 'safe']">
+                        <strong>AI Projection:</strong><br>
+                        {{ livePrediction === 1 ? '⚠️ Academic Support Recommended' : '✅ Pathway to Success' }}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="formal-analytical-report" class="pdf-hidden-container">
+        <div style="text-align: center; border-bottom: 3px solid #1e293b; padding-bottom: 20px; margin-bottom: 30px;">
+            <h1 style="margin: 0; color: #1e293b; font-size: 36px; text-transform: uppercase;">Official Report</h1>
+            <h3 style="color: #64748b;">Department of Computer Sciences</h3>
+            <p style="color: #64748b; font-weight: bold;">Course Code: {{ selectedCourse }} | Generated by Predictive AI</p>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 30px; margin-bottom: 30px;">
+            
+            <div style="flex: 1.2;">
+                <h3 style="color: #1e293b; border-bottom: 1px solid #cbd5e1; padding-bottom: 5px; margin-top: 0;">Executive Summary</h3>
+                <p id="ai-class-remarks" style="line-height: 1.6; color: #334155; font-size: 15px; margin-bottom: 20px;">Generating cohort analysis...</p>
+                
+                <h3 style="color: #1e293b; border-bottom: 1px solid #cbd5e1; padding-bottom: 5px; margin-top: 0;">👨‍🏫 Mentor Verdict</h3>
+                <div id="ai-mentor-verdict" style="line-height: 1.6; color: #334155; font-size: 14px; background: #f1f5f9; padding: 15px; border-radius: 8px; border-left: 4px solid #3b82f6;">
+                    Generating mentor strategy...
+                </div>
+            </div>
+            
+            <div style="flex: 0.8; display: flex; flex-direction: column; align-items: center; background: #f8fafc; padding: 20px; border-radius: 12px; border: 1px solid #cbd5e1;">
+                <h4 style="margin-top: 0; margin-bottom: 15px; color: #1e293b;">Risk Distribution</h4>
+                <div style="position: relative; width: 180px; height: 180px;">
+                    <canvas id="pdfPieChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <h3 style="color: #1e293b; border-bottom: 1px solid #cbd5e1; padding-bottom: 5px; margin-top: 0;">Priority Support Roster</h3>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 14px;">
+            <thead>
+                <tr style="background-color: #f1f5f9; color: #1e293b;">
+                    <th style="border: 1px solid #cbd5e1; padding: 12px; text-align: left;">Roll No</th>
+                    <th style="border: 1px solid #cbd5e1; padding: 12px; text-align: left;">Student Name</th>
+                    <th style="border: 1px solid #cbd5e1; padding: 12px; text-align: center;">Attendance</th>
+                    <th style="border: 1px solid #cbd5e1; padding: 12px; text-align: center;">Total Marks</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr v-for="student in atRiskStudents" :key="student.roll_no">
+                    <td style="border: 1px solid #cbd5e1; padding: 10px; color: #334155;">{{ student.roll_no }}</td>
+                    <td style="border: 1px solid #cbd5e1; padding: 10px; color: #334155; font-weight: bold;">{{ student.student_name }}</td>
+                    <td style="border: 1px solid #cbd5e1; padding: 10px; text-align: center; color: #ef4444; font-weight: bold;">{{ student.attendance }}%</td>
+                    <td style="border: 1px solid #cbd5e1; padding: 10px; text-align: center; color: #334155;">{{ student.internal_marks + student.unit_test_marks }}/80</td>
+                </tr>
+            </tbody>
+        </table>
+        <p style="margin-top: 40px; font-style: italic; text-align: center; color: #94a3b8; font-size: 12px;">Generated Securely | Confidential - For Administrative Use Only</p>
+    </div>
+    <div id="formal-student-report" class="pdf-hidden-container" style="padding: 40px; background: white; color: black; font-family: 'Times New Roman', serif;">
+        
+        <div style="text-align: center; border-bottom: 2px solid #1e293b; padding-bottom: 20px; margin-bottom: 30px;">
+            <h1 style="margin: 0; font-size: 28px; text-transform: uppercase; letter-spacing: 2px;">Official Progress Report</h1>
+            <h3 style="margin: 5px 0 0 0; color: #475569; font-weight: normal;">Department of Computer Sciences</h3>
+            <p style="margin: 5px 0 0 0; font-size: 14px; font-style: italic;">Academic Term: Fall 2026</p>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; margin-bottom: 30px; padding: 15px; border: 1px solid #cbd5e1; background: #f8fafc;">
+            <div>
+                <strong>Student Name:</strong> <span style="font-size: 18px;">{{ simData?.student_name }}</span><br>
+                <strong>Roll Number:</strong> {{ simData?.roll_no }}
+            </div>
+            <div style="text-align: right;">
+                <strong>Course Reg:</strong> {{ simData?.course }}<br>
+                <strong>Report Date:</strong> <span id="pdf-date"></span>
+            </div>
+        </div>
+
+        <h3 style="border-bottom: 1px solid #cbd5e1; padding-bottom: 5px; margin-bottom: 15px;">I. Academic Metrics</h3>
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px; text-align: center;">
+            <tr style="background-color: #f1f5f9; font-weight: bold;">
+                <td style="border: 1px solid #94a3b8; padding: 10px;">Subject / Category</td>
+                <td style="border: 1px solid #94a3b8; padding: 10px;">Score Achieved</td>
+                <td style="border: 1px solid #94a3b8; padding: 10px;">Maximum Marks</td>
+            </tr>
+            <tr>
+                <td style="border: 1px solid #94a3b8; padding: 10px; text-align: left;">Internal Assessments</td>
+                <td style="border: 1px solid #94a3b8; padding: 10px;">{{ simData?.internal_marks }}</td>
+                <td style="border: 1px solid #94a3b8; padding: 10px;">30</td>
+            </tr>
+            <tr>
+                <td style="border: 1px solid #94a3b8; padding: 10px; text-align: left;">Unit Examinations</td>
+                <td style="border: 1px solid #94a3b8; padding: 10px;">{{ simData?.unit_test_marks }}</td>
+                <td style="border: 1px solid #94a3b8; padding: 10px;">50</td>
+            </tr>
+            <tr style="background-color: #f8fafc; font-weight: bold;">
+                <td style="border: 1px solid #94a3b8; padding: 10px; text-align: left;">Total Academic Score</td>
+                <td style="border: 1px solid #94a3b8; padding: 10px;">{{ (simData?.internal_marks || 0) + (simData?.unit_test_marks || 0) }}</td>
+                <td style="border: 1px solid #94a3b8; padding: 10px;">80</td>
+            </tr>
+        </table>
+
+        <h3 style="border-bottom: 1px solid #cbd5e1; padding-bottom: 5px; margin-bottom: 15px;">II. Engagement & Conduct</h3>
+        <div style="display: flex; justify-content: space-around; margin-bottom: 30px;">
+            <div style="text-align: center; padding: 15px; border: 1px solid #cbd5e1; width: 45%;">
+                <div style="font-size: 14px; color: #475569;">Overall Attendance</div>
+                <div style="font-size: 24px; font-weight: bold;" :style="{ color: simData?.attendance < 75 ? '#ef4444' : '#10b981' }">{{ simData?.attendance }}%</div>
+            </div>
+            <div style="text-align: center; padding: 15px; border: 1px solid #cbd5e1; width: 45%;">
+                <div style="font-size: 14px; color: #475569;">Assignments Submitted</div>
+                <div style="font-size: 24px; font-weight: bold;">{{ simData?.assignments_completed }} / 10</div>
+            </div>
+        </div>
+
+        <h3 style="border-bottom: 1px solid #cbd5e1; padding-bottom: 5px; margin-bottom: 15px;">III. Professor's Remarks</h3>
+        <div style="padding: 20px; border: 1px solid #cbd5e1; background-color: #f8fafc; min-height: 100px; font-style: italic; line-height: 1.6;">
+            <span id="ai-student-remarks">Generating personalized remarks...</span>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; margin-top: 60px;">
+            <div style="text-align: center; width: 200px;">
+                <hr style="border-top: 1px solid black; margin-bottom: 5px;">
+                <span style="font-size: 14px;">Parent/Guardian Signature</span>
+            </div>
+            <div style="text-align: center; width: 200px;">
+                <hr style="border-top: 1px solid black; margin-bottom: 5px;">
+                <span style="font-size: 14px;">Head of Department</span>
+            </div>
+        </div>
+        
+        <p style="margin-top: 30px; font-size: 10px; color: #94a3b8; text-align: center; font-family: sans-serif;">Report officially generated by Academic Tracker Predictive AI Core.</p>
+    </div>
+
+</div>
+{% endraw %}
+<script src="{{ url_for('static', filename='app.js') }}?v=4"></script>
+</body>
+</html>

@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Academic Tracker</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        body { display: flex; justify-content: center; align-items: center; height: 100vh; background-color: var(--bg-color); margin: 0; font-family: 'Segoe UI', system-ui, sans-serif; transition: background-color 0.3s, color 0.3s; }
+        .theme-toggle-btn { position: absolute; top: 20px; right: 20px; background: var(--card-bg); color: var(--text-color); border: 1px solid var(--border-color); padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: bold; box-shadow: 0 4px 10px rgba(0,0,0,0.05); transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        .theme-toggle-btn:hover { transform: translateY(-3px); box-shadow: 0 6px 15px rgba(0,0,0,0.1); }
+        .login-card { background: var(--card-bg); padding: 40px; border-radius: 16px; box-shadow: 0 15px 35px rgba(0,0,0,0.1); width: 100%; max-width: 400px; border: 1px solid var(--border-color); text-align: center; animation: slideUp 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        .login-card h2 { margin-top: 0; color: var(--primary); font-size: 28px; }
+        .input-group { margin-bottom: 20px; text-align: left; }
+        .input-group label { display: block; margin-bottom: 8px; font-weight: bold; color: var(--text-color); opacity: 0.8; }
+        .input-group input { width: 100%; padding: 12px 15px; border-radius: 8px; border: 1px solid var(--input-border); background: var(--input-bg); color: var(--text-color); box-sizing: border-box; font-size: 16px; transition: all 0.2s; outline: none; }
+        .input-group input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2); }
+        .password-wrapper { position: relative; display: flex; align-items: center; }
+        .password-wrapper input { padding-right: 45px; } 
+        .eye-btn { position: absolute; right: 10px; background: transparent !important; border: none; cursor: pointer; font-size: 18px; color: var(--text-color); opacity: 0.5; transition: 0.2s; padding: 0; width: auto; box-shadow: none !important; outline: none; }
+        .eye-btn:hover { opacity: 1; transform: scale(1.1); }
+        .submit-btn { width: 100%; padding: 14px; background: var(--primary); color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        .submit-btn:hover { transform: translateY(-3px); box-shadow: 0 8px 20px rgba(59, 130, 246, 0.3); }
+        @keyframes slideUp { from { transform: translateY(30px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    </style>
+</head>
+<body>
+    <button id="themeToggle" class="theme-toggle-btn">🌙 Dark</button>
+
+    <div class="login-card">
+        <h2>🎓 Welcome Back</h2>
+        <p style="opacity: 0.7; margin-bottom: 30px;">Sign in to access your dashboard</p>
+
+        <form id="loginForm">
+            <div class="input-group">
+                <label>Roll Number (or ADMIN)</label>
+                <input type="text" id="roll_no" name="roll_no" autocomplete="username" required placeholder="e.g., 03BCA23001">
+            </div>
+            <div class="input-group">
+                <label>Password</label>
+                <div class="password-wrapper">
+                    <input type="password" id="password" name="password" autocomplete="current-password" required placeholder="Enter password">
+                    <button type="button" id="togglePassword" class="eye-btn" title="Toggle Password Visibility">👁️</button>
+                </div>
+            </div>
+            <button type="submit" class="submit-btn">Sign In</button>
+        </form>
+    </div>
+
+    <script>
+        const togglePassword = document.querySelector('#togglePassword');
+        const password = document.querySelector('#password');
+        togglePassword.addEventListener('click', function () {
+            const isPassword = password.getAttribute('type') === 'password';
+            password.setAttribute('type', isPassword ? 'text' : 'password');
+            this.textContent = isPassword ? '🙈' : '👁️';
+        });
+
+        const themeToggle = document.getElementById('themeToggle');
+        const htmlElement = document.documentElement;
+        let isDarkMode = localStorage.getItem('theme') === 'dark';
+        if (isDarkMode) { htmlElement.setAttribute('data-theme', 'dark'); themeToggle.textContent = '☀️ Light'; }
+
+        themeToggle.addEventListener('click', () => {
+            isDarkMode = !isDarkMode;
+            htmlElement.setAttribute('data-theme', isDarkMode ? 'dark' : 'light');
+            themeToggle.textContent = isDarkMode ? '☀️ Light' : '🌙 Dark';
+            localStorage.setItem('theme', isDarkMode ? 'dark' : 'light');
+        });
+
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const roll_no = document.getElementById('roll_no').value;
+            const pass = document.getElementById('password').value;
+
+            try {
+                const response = await fetch('/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ roll_no: roll_no, password: pass })
+                });
+
+                const data = await response.json();
+                if (response.ok && data.token) {
+                    localStorage.setItem('token', data.token.trim());
+                    window.location.href = data.role === 'admin' ? '/admin' : '/student'; 
+                } else {
+                    alert(data.error || 'Invalid login credentials');
+                }
+            } catch (error) {
+                console.error('Login error:', error);
+            }
+        });
+    </script>
+</body>
+</html>
